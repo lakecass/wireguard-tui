@@ -1,6 +1,6 @@
 # Binaries
-wg-tui
-wireguard-tui
+/wg-tui
+/wireguard-tui
 
 # Go build artifacts
 *.exe
