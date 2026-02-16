@@ -75,8 +75,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "space":
 			// Toggle interface UP/DOWN
-			m.toggleInterface()
-			return m, m.refreshData
+			if m.cursor < len(m.rows) && m.rows[m.cursor].Type == RowInterface {
+				iface := m.rows[m.cursor].Interface
+				newState := iface.Status == wg.InterfaceDown
+				return m, m.toggleCmd(iface.Name, newState)
+			}
 		case "enter":
 			// Toggle expansion for interfaces
 			if m.cursor < len(m.rows) && m.rows[m.cursor].Type == RowInterface {
@@ -265,10 +268,16 @@ func (m Model) View() string {
 			}
 
 			// Name with switch
-			// We need to calc length without ansi for alignment manually if we use Sprintf
-			// Or just simple concat
 			nameStr = fmt.Sprintf("%s %s %s", statusSymbol, row.InterfaceName, statusColored)
-			endStr = row.Interface.PublicKey[:8] + "..."
+			// Safe PublicKey display — avoid panic on empty/short keys
+			pk := row.Interface.PublicKey
+			if len(pk) > 8 {
+				endStr = pk[:8] + "..."
+			} else if len(pk) > 0 {
+				endStr = pk + "..."
+			} else {
+				endStr = "N/A"
+			}
 		} else {
 			treePrefix := "  |-"
 			pubKey := row.Peer.PublicKey
@@ -422,14 +431,14 @@ func overlayRight(line, overlay string, width int) string {
 
 // Logic helpers
 
-func (m Model) toggleInterface() {
-	if m.cursor < len(m.rows) && m.rows[m.cursor].Type == RowInterface {
-		iface := m.rows[m.cursor].Interface
-		newState := iface.Status == wg.InterfaceDown
-
-		go func() {
-			m.client.ToggleInterface(iface.Name, newState)
-		}()
+// toggleCmd returns a tea.Cmd that synchronously toggles the interface,
+// then triggers a data refresh. This eliminates the race condition where
+// refreshData could run before the toggle completes.
+func (m Model) toggleCmd(name string, up bool) tea.Cmd {
+	return func() tea.Msg {
+		_ = m.client.ToggleInterface(name, up)
+		// Now refresh data after toggle is complete
+		return m.refreshData()
 	}
 }
 

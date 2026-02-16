@@ -27,24 +27,24 @@ func (c *LinuxClient) GetInterfaces() ([]Interface, error) {
 		return nil, err
 	}
 	activeInterfaces := parseInterfaces(output)
-	activeMap := make(map[string]Interface)
-	for _, iface := range activeInterfaces {
-		iface.Status = InterfaceUp
-		activeMap[iface.Name] = iface
+
+	// Mark all parsed interfaces as UP (they came from `wg show`, so they are running)
+	for i := range activeInterfaces {
+		activeInterfaces[i].Status = InterfaceUp
 	}
 
-	// 2. Scan /etc/wireguard/*.conf for all available configs
-	// We need read permissions on /etc/wireguard
-	configFiles, _ := filepath.Glob("/etc/wireguard/*.conf")
-
-	var allInterfaces []Interface
+	// Build a set of active interface names for quick lookup
 	seen := make(map[string]bool)
+	var allInterfaces []Interface
 
-	// Add active interfaces first (they might not have a conf file in /etc/wireguard, e.g. ephemeral)
+	// Add active interfaces first
 	for _, iface := range activeInterfaces {
 		allInterfaces = append(allInterfaces, iface)
 		seen[iface.Name] = true
 	}
+
+	// 2. Scan /etc/wireguard/*.conf for all available configs
+	configFiles, _ := filepath.Glob("/etc/wireguard/*.conf")
 
 	// Add inactive interfaces from config files
 	for _, file := range configFiles {
@@ -53,7 +53,6 @@ func (c *LinuxClient) GetInterfaces() ([]Interface, error) {
 			allInterfaces = append(allInterfaces, Interface{
 				Name:   name,
 				Status: InterfaceDown,
-				// We could parse the config file to get ListenPort/etc, but maybe overkill for now
 			})
 			seen[name] = true
 		}
