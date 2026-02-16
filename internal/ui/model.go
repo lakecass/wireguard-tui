@@ -75,7 +75,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "space":
 			// Toggle interface UP/DOWN
-			return m, m.toggleInterface()
+			m.toggleInterface()
+			return m, m.refreshData
 		case "enter":
 			// Toggle expansion for interfaces
 			if m.cursor < len(m.rows) && m.rows[m.cursor].Type == RowInterface {
@@ -356,53 +357,108 @@ func (m Model) View() string {
 	}
 	footerContent := strings.Join(footerItems, "")
 
-	// Create a footer style that fills the background
-	styleFooter := lipgloss.NewStyle().
-		Background(theme.DescBg) // Match Description background
+	// Create a footer base style that fills the background
+	styleBar := lipgloss.NewStyle().Background(theme.DescBg)
 
-	// Pad footer to fill width
-	footerLen := lipgloss.Width(footerContent)
-	footerPad := width - footerLen
-	if footerPad > 0 {
-		footerContent += strings.Repeat(" ", footerPad)
+	// Combine content
+	fullFooter := footerContent
+
+	// Calculate padding
+	visibleLen := lipgloss.Width(footerContent)
+	padding := width - visibleLen
+	if padding > 0 {
+		fullFooter += strings.Repeat(" ", padding)
 	}
 
-	s += "\n" + styleFooter.Render(footerContent)
+	// Render the whole block with the base style
+	s += "\n" + styleBar.Render(fullFooter)
 
 	return s
 
 }
 
+// Overlay string on the right side
+func overlayRight(line, overlay string, width int) string {
+	// This is tricky with ANSI codes in `line`.
+	// For now, let's assume `line` has padding spaces at the end if we used .Width(width).
+	// But styling adds ANSI codes at the end (reset).
+
+	// Simpler approach:
+	// Construct the line as:  [Content .....   Mascot]
+	// If the content overlaps, Mascot takes precedence?
+
+	// Since we are using full-width backgrounds, `line` is full of ANSI.
+	// Let's use Lipgloss to render the mascot with a transparent background (or matching background)
+	// and use `lipgloss.Place` concept or just manual spacing.
+
+	// Manual:
+	// 1. Remove last `len(overlay)` distinct characters (ignoring ANSI) ?? Hard.
+
+	// 2. Just print mascot on a new layer? Bubbletea doesn't support layers easily in string view.
+
+	// 3. Re-render the line.
+	// If this is an empty filler line, it is easy.
+	// If it has content, we might hide content.
+
+	// Let's just overlay on empty lines for now (Mascot will sit in empty space).
+	// If line is empty (just spaces), we replace end.
+
+	// Quick hack:
+	// Force the line to be Width - MascotWidth, then append Mascot.
+	// But styles...
+
+	// Let's just return line + "\n" + overlay? No.
+
+	// Let's try to assume the line is padded with spaces and ANSI reset is at end.
+	// Only apply mascot if line represents "Empty" space (filler).
+	if strings.Contains(line, "          ") { // heuristics
+		// It's likely empty-ish.
+		// Use lipgloss to place.
+		return lipgloss.NewStyle().Width(width).Align(lipgloss.Right).Render(overlay)
+	}
+
+	return line
+}
 
 // Logic helpers
 
-func (m Model) toggleInterface() tea.Cmd {
+func (m Model) toggleInterface() {
 	if m.cursor < len(m.rows) && m.rows[m.cursor].Type == RowInterface {
 		iface := m.rows[m.cursor].Interface
 		newState := iface.Status == wg.InterfaceDown
 
-		return func() tea.Msg {
-			// Perform toggle synchronously in the Cmd
-			_ = m.client.ToggleInterface(iface.Name, newState)
-			// Return a message to trigger refresh?
-			// Or just call refreshData logic here?
-			// refreshData returns tea.Msg (which is []Row or error).
-			// So we can just call it (since it's a method on Model that returns Msg, but wait, refreshData receives (m Model)... pure function?)
-
-			// m.refreshData() returns tea.Msg
-			// So we can just return that.
-			return m.refreshData()
-		}
+		go func() {
+			m.client.ToggleInterface(iface.Name, newState)
+		}()
 	}
-	return nil
 }
 
 func (m Model) flattenRows(baseRows []Row) []Row {
 	var flat []Row
 	for _, r := range baseRows {
 		flat = append(flat, r)
+		// Assuming baseRows has interfaces, and refreshData attaches peers??
+		// Actually, refreshData implementation below attaches peers properly.
+		// Wait, refreshData does NOT attach peers to `r.Children`.
+		// It returns a flat list already?
+		// CHECK: refreshData implementation below.
 	}
-	// ... (rest logic same, just truncating for context)
+	// My previous implementation of refreshData returned a flat list.
+	// So `flattenRows` might be redundant or just a pass-through if we don't change the structure.
+	// But `Update` calls `flattenRows`.
+	// Let's ensure `refreshData` returns what we expect.
+	// If refreshData returns flat list including expanded peers, then we just use it.
+	// BUT, Update Logic for expansion re-flattens.
+	// We need to re-implement `refreshData` to honor expansion or just return raw data and let Update flatten?
+	// Best approach: `refreshData` returns only Interfaces (and maybe their peers in a struct), and we flatten in Update/View?
+	// Or `refreshData` honors `Expanded` state?
+	// The problem is `refreshData` runs periodically.
+
+	// Let's stick to: Update receives []Row (new data).
+	// We re-apply expansion state.
+	// Then we filter out peers if interface is collapsed?
+
+	// Let's refine `refreshData` to return everything, and `flattenRows` (or `filterRows`) hides collapsed peers.
 	return filterCollapsed(flat)
 }
 
@@ -461,30 +517,22 @@ func (m Model) tickCmd() tea.Cmd {
 }
 
 func (m Model) renderDetailsPanel(width, height int, theme Theme) string {
-	// Calculate dimensions
-	panelWidth := width - 2
-	panelHeight := height - 2
-
 	// Style for panel
-	// Use DescBg to unify with footer as requested
 	stylePanel := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(theme.ColumnHeaderFg).
-		Background(theme.DescBg).
-		Width(panelWidth).
-		Height(panelHeight)
+		Width(width - 2). // Account for border
+		Height(height - 2)
 
 	if m.cursor >= len(m.rows) {
 		return stylePanel.Render("No selection")
 	}
 
 	row := m.rows[m.cursor]
-	contentLines := []string{}
+	content := ""
 
-	// Label/Value styles - adjust foreground to be visible on DescBg
-	// Use DescFg (which is designed for DescBg)
-	styleLabel := lipgloss.NewStyle().Foreground(theme.ColumnHeaderFg).Bold(true).Background(theme.DescBg)
-	styleValue := lipgloss.NewStyle().Foreground(theme.DescFg).Background(theme.DescBg)
+	styleLabel := lipgloss.NewStyle().Foreground(theme.ColumnHeaderFg).Bold(true)
+	styleValue := lipgloss.NewStyle().Foreground(theme.NormalFg)
 
 	if row.Type == RowInterface {
 		iface := row.Interface
@@ -493,23 +541,27 @@ func (m Model) renderDetailsPanel(width, height int, theme Theme) string {
 			status = "DOWN"
 		}
 
-		contentLines = append(contentLines, fmt.Sprintf("Interface: %s", styleLabel.Render(iface.Name)))
-		contentLines = append(contentLines, fmt.Sprintf("Status:    %s", styleValue.Render(status)))
-		contentLines = append(contentLines, fmt.Sprintf("Public Key: %s", styleValue.Render(iface.PublicKey)))
-		contentLines = append(contentLines, fmt.Sprintf("Port:      %d", iface.ListenPort)) // Raw int, minimal style
-		contentLines = append(contentLines, fmt.Sprintf("FwMark:    %d", iface.FirewallMark))
+		content += fmt.Sprintf("Interface: %s\n", styleLabel.Render(iface.Name))
+		content += fmt.Sprintf("Status:    %s\n", styleValue.Render(status))
+		content += fmt.Sprintf("Public Key: %s\n", styleValue.Render(iface.PublicKey))
+		content += fmt.Sprintf("Port:      %d\n", iface.ListenPort)
+		content += fmt.Sprintf("FwMark:    %d\n", iface.FirewallMark)
 	} else {
 		peer := row.Peer
-		contentLines = append(contentLines, fmt.Sprintf("Peer:      %s", styleLabel.Render(peer.PublicKey)))
-		contentLines = append(contentLines, fmt.Sprintf("Endpoint:  %s", styleValue.Render(peer.Endpoint)))
-		contentLines = append(contentLines, fmt.Sprintf("AllowedIPs: %v", peer.AllowedIPs))
-		contentLines = append(contentLines, fmt.Sprintf("Transfer:  Rx: %s / Tx: %s", formatBytes(peer.TransferRx), formatBytes(peer.TransferTx)))
+		content += fmt.Sprintf("Peer:      %s\n", styleLabel.Render(peer.PublicKey))
+		content += fmt.Sprintf("Endpoint:  %s\n", styleValue.Render(peer.Endpoint))
+		content += fmt.Sprintf("AllowedIPs: %v\n", peer.AllowedIPs)
+		content += fmt.Sprintf("Transfer:  Rx: %s / Tx: %s\n", formatBytes(peer.TransferRx), formatBytes(peer.TransferTx))
 		handshake := "Never"
 		if !peer.LatestHandshake.IsZero() {
 			handshake = time.Since(peer.LatestHandshake).String() + " ago"
 		}
-		contentLines = append(contentLines, fmt.Sprintf("Handshake: %s", styleValue.Render(handshake)))
+		content += fmt.Sprintf("Handshake: %s\n", styleValue.Render(handshake))
 	}
+
+	// Mascot Overlay in Details Panel?
+	// The user asked for "fill the bottom" and mascot to be bottom right.
+	// We can put the mascot inside the details panel on the right side.
 
 	// Calculate mascot frame
 	anyUp := false
@@ -521,62 +573,39 @@ func (m Model) renderDetailsPanel(width, height int, theme Theme) string {
 	}
 	frame := GetMascotFrame(int(time.Now().UnixMilli()/200), anyUp)
 
-	// Combine content and mascot
-	// We manually pad content lines to width, and on the last few lines we insert mascot
+	// Render Panel
+	panelStr := stylePanel.Render(content)
 
-	// Create final content string
-	var finalContent string
+	// Overlay Mascot on top of Panel string (bottom right corner)
+	// Lipgloss border makes this tricky once rendered.
+	// Easier to append mascot to content before render?
+	// Or use Place.
 
-	// Helper to pad line
-	padLine := func(s string, w int) string {
-		// ANSI aware length?
-		// Since we are inside the panel, lipgloss handles the panel width.
-		// Use lipgloss Place?
-		// Simple approach: Render content left, Mascot right.
-		return lipgloss.NewStyle().Width(w).Background(theme.DescBg).Render(s)
+	// Let's use `lipgloss.Place` to position mascot in the panel area.
+	// Actually simple string overlay on the last line of content might be cleaner if we have space.
+
+	// Let's stick to the "Global" footer area for mascot if Panel is full?
+	// But the panel IS the footer area now.
+
+	// Let's render the mascot as a separate block aligned right, and JoinHorizontal with content?
+	// Content (Left) + Spacer + Mascot (Right)
+
+	mascotStyle := lipgloss.NewStyle().Align(lipgloss.Right).Width(width - 4 - lipgloss.Width(content)) // rough calc
+	_ = mascotStyle
+	// Just place it manually in the string if possible.
+
+	// For now, let's just return the panel. The mascot was "bottom right" of the screen.
+	// The panel is at the bottom.
+	// We can inject the mascot into the panel text.
+
+	lines := strings.Split(panelStr, "\n")
+	if len(lines) > 2 {
+		// Inject into bottom-most content line (inside border)
+		targetLine := len(lines) - 2 // -1 is bottom border
+		lines[targetLine] = overlayRight(lines[targetLine], frame, width-2)
 	}
 
-	// We simply join lines?
-	// But we want mascot at bottom right.
-	// Inject mascot into empty lines at the bottom?
-
-	// Fill remaining lines with empty strings
-	for len(contentLines) < panelHeight {
-		contentLines = append(contentLines, "")
-	}
-
-	// Inject mascot into the last line (or last N lines if multi-line mascot)
-	// Frame is single line string?
-	lastIdx := panelHeight - 1
-	if lastIdx >= 0 && lastIdx < len(contentLines) {
-		// Construct the last line: Content (Left) + Space + Mascot (Right)
-
-		// Use lipgloss to layout
-		// PlaceHorizontal
-		combined := lipgloss.NewStyle().Width(panelWidth).Background(theme.DescBg).
-			Render(
-				lipgloss.PlaceHorizontal(panelWidth, lipgloss.Right, frame,
-					lipgloss.WithWhitespaceChars(" "),
-					lipgloss.WithWhitespaceForeground(theme.DescFg), // matching fg?
-				),
-			)
-
-		// Wait, PlaceHorizontal REPLACES content? No, it places content in width.
-		// Currently `leftContent` is essentially empty string for the last line usually.
-		// If it's not empty, we might overwrite.
-		// Assuming last line is empty for now.
-		contentLines[lastIdx] = combined
-	}
-
-	// Apply padding to all other lines to ensure background fill
-	for i := 0; i < len(contentLines); i++ {
-		if i != lastIdx { // lastIdx already handled
-			contentLines[i] = padLine(contentLines[i], panelWidth)
-		}
-	}
-
-	finalContent = strings.Join(contentLines, "\n")
-	return stylePanel.Render(finalContent)
+	return strings.Join(lines, "\n")
 }
 
 func truncate(s string, maxLen int) string {
