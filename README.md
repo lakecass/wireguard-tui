@@ -2,7 +2,8 @@
 
 一个受 `htop` 启发，专为管理 WireGuard VPN 隧道而设计的精美终端用户界面 (TUI)。
 
-![WireGuard TUI](docs/screenshot.png)
+![WireGuard TUI Tokyo Night](docs/screenshots/screenshot_tokyo.png)
+![WireGuard TUI Solarized Light](docs/screenshots/screenshot_solarized.png)
 
 ## 功能特性
 
@@ -117,7 +118,7 @@ wireguard-tui/
 
 ## 许可证
 
-MIT License - 详见 LICENSE 文件
+GNU General Public License v3.0 - 详见 [LICENSE](LICENSE) 文件
 
 ## 贡献
 
