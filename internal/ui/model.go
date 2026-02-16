@@ -423,10 +423,37 @@ func overlayRight(line, overlay string, width int) string {
 // Logic helpers
 
 func (m Model) toggleInterface() {
-	if m.cursor < len(m.rows) && m.rows[m.cursor].Type == RowInterface {
-		iface := m.rows[m.cursor].Interface
-		newState := iface.Status == wg.InterfaceDown
+	if m.cursor >= len(m.rows) {
+		return
+	}
 
+	currentRow := m.rows[m.cursor]
+	targetName := currentRow.InterfaceName
+
+	// We need to find the current status of this interface.
+	// Since we are in the UI model, the efficient way is to find the Interface Row in m.rows
+	// (It should be there if we are viewing a peer of it).
+
+	var iface wg.Interface
+	found := false
+
+	// If current row IS the interface, use it
+	if currentRow.Type == RowInterface {
+		iface = currentRow.Interface
+		found = true
+	} else {
+		// Search for parent interface row
+		for _, r := range m.rows {
+			if r.Type == RowInterface && r.InterfaceName == targetName {
+				iface = r.Interface
+				found = true
+				break
+			}
+		}
+	}
+
+	if found {
+		newState := iface.Status == wg.InterfaceDown
 		go func() {
 			m.client.ToggleInterface(iface.Name, newState)
 		}()
