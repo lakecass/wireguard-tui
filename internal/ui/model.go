@@ -73,12 +73,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.rows)-1 {
 				m.cursor++
 			}
-		case "space":
+		case " ":
 			// Toggle interface UP/DOWN
-			if m.cursor < len(m.rows) && m.rows[m.cursor].Type == RowInterface {
-				iface := m.rows[m.cursor].Interface
-				newState := iface.Status == wg.InterfaceDown
-				return m, m.toggleCmd(iface.Name, newState)
+			// Bubble Tea returns " " for space key, NOT "space"
+			if m.cursor < len(m.rows) {
+				targetRow := m.rows[m.cursor]
+				// If cursor is on a peer row, find the parent interface
+				if targetRow.Type == RowPeer {
+					for j := m.cursor - 1; j >= 0; j-- {
+						if m.rows[j].Type == RowInterface {
+							targetRow = m.rows[j]
+							break
+						}
+					}
+				}
+				if targetRow.Type == RowInterface {
+					iface := targetRow.Interface
+					newState := iface.Status == wg.InterfaceDown
+					return m, m.toggleCmd(iface.Name, newState)
+				}
 			}
 		case "enter":
 			// Toggle expansion for interfaces
