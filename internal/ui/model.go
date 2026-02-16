@@ -198,11 +198,13 @@ func (m Model) View() string {
 	// 1. Header
 	headerText := fmt.Sprintf(" WireGuard TUI (%s) ", theme.Name)
 	clock := time.Now().Format("15:04:05")
-	padLen := width - lipgloss.Width(headerText) - len(clock) - 1
+	padLen := width - lipgloss.Width(headerText) - len(clock)
 	if padLen < 0 {
 		padLen = 0
 	}
-	header := styleHeader.Width(width).Render(fmt.Sprintf("%s%*s%s", headerText, padLen, "", clock))
+	// Manual padding instead of .Width() to ensure visibility
+	headerStr := fmt.Sprintf("%s%*s%s", headerText, padLen, "", clock)
+	header := styleHeader.Render(headerStr)
 
 	// 2. Column Headers
 	colRow := fmt.Sprintf("%-*s%-*s%-*s%-*s",
@@ -212,7 +214,7 @@ func (m Model) View() string {
 		wHand, "Handshake")
 
 	// Ensure background fills full width
-	colHeader := styleColHeader.Width(width).Render(colRow)
+	colHeader := styleColHeader.Render(colRow)
 
 	// 3. Body (Split View)
 	// Top: List
@@ -285,14 +287,20 @@ func (m Model) View() string {
 
 		// Truncation needs to happen on raw strings before color, or handle ansi width
 		// Name column is tricky due to color.
-		// Simpler: Just truncate the text parts.
 
-		// Re-construct line with truncation
-		// We can't easily truncate nameStr with ANSI inside.
-		// Let's assume name doesn't overflow wName too much.
+		// Use lipgloss to measure visible width of nameStr
+		visibleNameLen := lipgloss.Width(nameStr)
+		paddingName := wName - visibleNameLen
+		if paddingName < 0 {
+			paddingName = 0
+		}
 
-		line := fmt.Sprintf("%-*s%-*s%-*s%-*s",
-			wName+10, nameStr, // Extra space for ANSI codes estimate? Hacky but works for fixed codes
+		// Construct the name column with correct visual width
+		// We append spaces manually instead of using %-*s with incorrect length
+		nameCol := nameStr + strings.Repeat(" ", paddingName)
+
+		line := fmt.Sprintf("%s%-*s%-*s%-*s",
+			nameCol,
 			wEnd, truncate(endStr, wEnd-1),
 			wTran, truncate(tranStr, wTran-1),
 			wHand, truncate(handStr, wHand-1),
@@ -351,8 +359,14 @@ func (m Model) View() string {
 
 	// Create a footer style that fills the background
 	styleFooter := lipgloss.NewStyle().
-		Background(theme.DescBg). // Match Description background
-		Width(width)
+		Background(theme.DescBg) // Match Description background
+
+	// Pad footer to fill width
+	footerLen := lipgloss.Width(footerContent)
+	footerPad := width - footerLen
+	if footerPad > 0 {
+		footerContent += strings.Repeat(" ", footerPad)
+	}
 
 	s += "\n" + styleFooter.Render(footerContent)
 
