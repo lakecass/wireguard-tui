@@ -202,7 +202,7 @@ func (m Model) View() string {
 	if padLen < 0 {
 		padLen = 0
 	}
-	header := styleHeader.Render(fmt.Sprintf("%s%*s%s", headerText, padLen, "", clock))
+	header := styleHeader.Width(width).Render(fmt.Sprintf("%s%*s%s", headerText, padLen, "", clock))
 
 	// 2. Column Headers
 	colRow := fmt.Sprintf("%-*s%-*s%-*s%-*s",
@@ -340,14 +340,21 @@ func (m Model) View() string {
 	s := header + "\n" + colHeader + "\n" + strings.Join(bodyRows, "\n") + "\n" + details
 
 	// 5. Footer (Overlay / Append)
-	footer := ""
-	footer += styleKey.Render("F1") + styleDesc.Render("Help")
-	footer += styleKey.Render("F2") + styleDesc.Render("Theme")
-	footer += styleKey.Render("Space") + styleDesc.Render("Toggle")
-	footer += styleKey.Render("Enter") + styleDesc.Render("Expand")
-	footer += styleKey.Render("F10") + styleDesc.Render("Quit")
+	footerItems := []string{
+		styleKey.Render("F1") + styleDesc.Render("Help"),
+		styleKey.Render("F2") + styleDesc.Render("Theme"),
+		styleKey.Render("Space") + styleDesc.Render("Toggle"),
+		styleKey.Render("Enter") + styleDesc.Render("Expand"),
+		styleKey.Render("F10") + styleDesc.Render("Quit"),
+	}
+	footerContent := strings.Join(footerItems, "")
 
-	s += "\n" + footer
+	// Create a footer style that fills the background
+	styleFooter := lipgloss.NewStyle().
+		Background(theme.DescBg). // Match Description background
+		Width(width)
+
+	s += "\n" + styleFooter.Render(footerContent)
 
 	return s
 
