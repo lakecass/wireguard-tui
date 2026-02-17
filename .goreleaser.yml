@@ -1,0 +1,55 @@
+# .goreleaser.yml
+# Build customization
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    main: ./cmd/wireguard-tui/main.go
+    binary: wireguard-tui
+
+# Archive customization
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - docs/*
+
+# NFPM (Next Generation FPM) for .deb and .rpm
+nfpms:
+  - id: deb
+    package_name: wireguard-tui
+    file_name_template: "{{ .PackageName }}_{{ .Version }}_{{ .Arch }}"
+    vendor: lakecass
+    homepage: https://github.com/lakecass/wireguard-tui
+    maintainer: lakecass and Gemini
+    description: A modern htop-like TUI for WireGuard
+    license: GPL-3.0
+    formats:
+      - deb
+    contents:
+      - src: ./wireguard-tui
+        dst: /usr/bin/wireguard-tui
+        file_info:
+          mode: 0755
+
+# Arch Linux packaging
+# Goreleaser doesn't natively generate .pkg.tar.zst yet, 
+# but we can provide the PKGBUILD for the AUR or local build
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"

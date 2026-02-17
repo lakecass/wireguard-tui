@@ -123,7 +123,7 @@ func parseInterfaces(output string) []Interface {
 
 			interfaces = append(interfaces, Interface{
 				Name:         name,
-				PublicKey:    parts[2],
+				PublicKey:    parts[1],
 				ListenPort:   port,
 				FirewallMark: fwMark,
 			})
